@@ -6,7 +6,10 @@ on:
 
 jobs:
   macos:
-    runs-on: macos-26
+    # Machine Intel : autre lot que macos-15 / macos-26 (Apple Silicon), qui n'ont pas démarré.
+    # macos-14 est retiré le 2 novembre 2026 : ne pas l'utiliser.
+    runs-on: macos-15-intel
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +33,7 @@ jobs:
           AU="build/mask-klimax_artefacts/Release/AU/mask-klimax.component"
           VST3="build/mask-klimax_artefacts/Release/VST3/mask-klimax.vst3"
           /usr/libexec/PlistBuddy -c "Print :AudioComponents:0:name" "$AU/Contents/Info.plist" || true
+          lipo -archs "$AU/Contents/MacOS/mask-klimax" || true
           codesign --force --deep --sign - "$AU"
           codesign --force --deep --sign - "$VST3"
           mkdir -p root-au root-vst3
