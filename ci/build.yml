@@ -1,0 +1,60 @@
+name: build-macos
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version (lue dans CMakeLists.txt)
+        run: |
+          VERSION=$(sed -nE 's/^project\(MASK_KLIMAX VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Version : $VERSION"
+
+      - name: Configuration
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Compilation (AU + VST3 universels)
+        run: cmake --build build --config Release -j 4
+
+      - name: Signature ad hoc + installateur
+        run: |
+          AU="build/mask-klimax_artefacts/Release/AU/mask-klimax.component"
+          VST3="build/mask-klimax_artefacts/Release/VST3/mask-klimax.vst3"
+          /usr/libexec/PlistBuddy -c "Print :AudioComponents:0:name" "$AU/Contents/Info.plist" || true
+          codesign --force --deep --sign - "$AU"
+          codesign --force --deep --sign - "$VST3"
+          mkdir -p root-au root-vst3
+          cp -R "$AU" root-au/
+          cp -R "$VST3" root-vst3/
+          for k in au vst3; do
+            pkgbuild --analyze --root "root-$k" "comp-$k.plist"
+            plutil -replace 0.BundleIsRelocatable -bool NO "comp-$k.plist"
+          done
+          pkgbuild --root root-au --component-plist comp-au.plist --install-location /Library/Audio/Plug-Ins/Components \
+            --identifier com.mask.klimax.au --version "$VERSION" au.pkg
+          pkgbuild --root root-vst3 --component-plist comp-vst3.plist --install-location /Library/Audio/Plug-Ins/VST3 \
+            --identifier com.mask.klimax.vst3 --version "$VERSION" vst3.pkg
+          productbuild --package au.pkg --package vst3.pkg "mask-klimax-$VERSION.pkg"
+
+      - name: auval (non bloquant)
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/mask-klimax_artefacts/Release/AU/mask-klimax.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 3
+          auval -v aufx Mklx Mask
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mask-klimax-installateur
+          path: mask-klimax-*.pkg
